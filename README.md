@@ -575,5 +575,5 @@ PPHPD = 85 × 3 = 255 passagers/heure
 
 ---
 
-**Document généré par le Système d'Analyse des Lignes de Bus**  
-**Version 1.0 - 2025-11-09**
+**Document généré par Tomorrow Systems**  
+**Version 2.1 - 2025-11-09**
