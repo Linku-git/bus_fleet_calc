@@ -13,14 +13,100 @@ Ce document détaille toutes les équations et méthodologies de calcul utilisé
 | **Tt+Td** | Temps de retournement total | 10 | minutes |
 | **v_hlp** | Vitesse hors ligne passagers (HLP) | 25 | km/h |
 | **v_tech** | Vitesse technique | 20 | km/h |
+| **v_commercial** | Vitesse commerciale (pour calculs théoriques) | 18 | km/h |
 | **r_FMDS** | Ratio technique maintenance | 0.05 | ratio |
 | **r_ACC** | Ratio accidentologie | 0.01 | ratio |
 | **α (alpha)** | Multiplicateur heures payées | 1.10 | ratio |
 | **β (beta)** | Réserve conducteurs | 0.12 | ratio |
 | **γ (gamma)** | Ratio véhicules de réserve | 0.12 | ratio |
 | **h_poste** | Durée du poste conducteur | 7.5 | heures |
-| **C** | Capacité par bus | 85 | passagers |
+| **C** | Capacité par bus (globale) | 85 | passagers |
 | **δ (delta)** | Distance dépôt (moyenne) | variable | km |
+
+---
+
+## 📋 Paramètres Spécifiques par Ligne
+
+Le système a été simplifié pour ne permettre qu'un seul paramètre personnalisable par ligne : **la longueur du bus**. Tous les autres paramètres opérationnels utilisent strictement les valeurs globales du réseau, assurant ainsi une cohérence de gestion tout en permettant l'adaptation aux différents types de matériel roulant.
+
+### Paramètre Personnalisable
+
+| Paramètre | Description | Valeur par Défaut | Plage Valide | Unité |
+|-----------|-------------|-------------------|--------------|-------|
+| **longueur_bus** | Longueur physique du bus | 12.0 | 6-25 | mètres |
+
+### Capacité Automatiquement Calculée
+
+La capacité du bus est **automatiquement dérivée** de sa longueur selon une table de correspondance :
+
+| Longueur du Bus | Capacité Calculée | Type de Bus |
+|-----------------|-------------------|-------------|
+| < 9 m | 65 passagers | Minibus |
+| 9 m - < 12 m | 85 passagers | Bus standard |
+| 12 m - < 18 m | 110 passagers | Bus articulé court |
+| ≥ 18 m | 150 passagers | Bus articulé long |
+
+**Formule de calcul** :
+```python
+def get_capacity_from_length(longueur_bus):
+    if longueur_bus < 9:
+        return 65
+    elif longueur_bus < 12:
+        return 85
+    elif longueur_bus < 18:
+        return 110
+    else:
+        return 150
+```
+
+**Note** : La capacité de 85 passagers est attribuée pour les bus de 9 m à moins de 12 m. À partir de 12 m exactement, la capacité passe à 110 passagers.
+
+### Utilisation dans les Calculs
+
+**1. Longueur du bus (longueur_bus)** :
+- **Impact direct** : 
+  - Détermine automatiquement la capacité du bus
+  - Planification de l'infrastructure (quais, arrêts, garages)
+- **Impact indirect** :
+  - Calcul du PPHPD via la capacité calculée
+- **Types courants** : 
+  - 8m (minibus urbain)
+  - 12m (bus standard)
+  - 18m (bus articulé)
+  - 24m (bus bi-articulé)
+
+**2. Capacité calculée (dérivée de longueur_bus)** :
+- **Jamais stockée** : Toujours calculée à la volée
+- **Impact** : Calcul du PPHPD (Passagers Par Heure Par Direction)
+- **Formule** : `PPHPD = capacité_calculée × (60 / f_pointe)`
+
+### Paramètres Utilisant les Valeurs Globales
+
+Les paramètres suivants utilisent **exclusivement** les valeurs globales du réseau (non personnalisables par ligne) :
+
+- **Tt_Td** : Temps de retournement aux terminus (10 min)
+- **v_tech** : Vitesse technique (20 km/h)
+- **alpha** : Coefficient multiplicateur heures payées (1.10)
+- **gamma** : Ratio de réserve de flotte (0.12)
+- **h_poste** : Durée du poste conducteur (7.5h)
+
+Cette approche simplifie la gestion du réseau tout en maintenant la cohérence des politiques opérationnelles et RH
+
+### Localisation Proche du Dépôt
+
+Le système détermine automatiquement quelle extrémité de la ligne (origine ou destination) est la plus proche du dépôt en comparant :
+
+```
+Si distance_origine_dépôt_min < distance_destination_dépôt_min :
+    Localisation proche = "Origine"
+Sinon :
+    Localisation proche = "Destination"
+```
+
+Cette information est utilisée pour optimiser :
+- Les trajets HLP (Hors Ligne Passagers)
+- La planification des rotations de bus
+- L'ordonnancement des départs depuis le dépôt
 
 ---
 
@@ -231,9 +317,11 @@ Km_tot = Km_com + Km_HLP + Km_tech
 
 ## ⏱️ Section 4 : Calcul des Heures
 
-### 4.1 Heures de Charge
+Le système calcule trois catégories distinctes d'heures pour une analyse détaillée de l'exploitation :
 
-Les heures de charge représentent le temps de conduite avec passagers.
+### 4.1 Heures Commercial (H_charge)
+
+Les heures commerciales représentent le **temps de conduite avec passagers** (service commercial actif).
 
 ```
 H_charge = (temps_aller × Trips_AB + temps_retour × Trips_BA) / 60
@@ -247,7 +335,9 @@ H_charge = (temps_aller × Trips_AB + temps_retour × Trips_BA) / 60
 - Trips_AB = Trips_BA : 51 voyages
 - **H_charge = (29 × 51 + 29 × 51) / 60 = 2,958 / 60 = 49.3 heures**
 
-### 4.2 Heures Hors Ligne Passagers (HLP)
+### 4.2 Heures Hors Ligne Passagers (H_HLP)
+
+Les heures HLP représentent le temps de trajet **à vide entre le dépôt et les terminus**.
 
 ```
 H_HLP = Km_HLP / v_hlp
@@ -261,7 +351,9 @@ H_HLP = Km_HLP / v_hlp
 - v_hlp : 25 km/h
 - **H_HLP = 100 / 25 = 4 heures**
 
-### 4.3 Heures Techniques
+### 4.3 Heures Techniques (H_tech)
+
+Les heures techniques représentent le temps passé en **maintenance et gestion des incidents**.
 
 ```
 H_tech = Km_tech / v_tech
@@ -275,16 +367,51 @@ H_tech = Km_tech / v_tech
 - v_tech : 20 km/h
 - **H_tech = 53.2 / 20 = 2.66 heures**
 
-### 4.4 Heures Totales
+### 4.4 Heures Technique (Agrégation H_HLP + H_tech)
+
+Pour l'analyse annuelle, les heures HLP et techniques sont regroupées en **Heures Technique** :
+
+```
+H_technique_an = H_HLP + H_tech
+```
+
+Cette agrégation permet de distinguer clairement :
+- **Heures Commercial** : Temps de service avec passagers (générateur de revenus)
+- **Heures Technique** : Temps hors service commercial (coûts opérationnels)
+
+**Exemple :**
+- H_HLP : 4 heures
+- H_tech : 2.66 heures
+- **H_technique_an = 4 + 2.66 = 6.66 heures**
+
+### 4.5 Heures Totales (H_total)
 
 ```
 H_total = H_charge + H_HLP + H_tech
 ```
 
+**Ou de manière équivalente :**
+```
+H_total = H_charge + H_technique_an
+```
+
 **Exemple :**
+- H_charge : 49.3 heures
+- H_HLP : 4 heures
+- H_tech : 2.66 heures
 - **H_total = 49.3 + 4 + 2.66 = 55.96 heures**
 
-### 4.5 Heures Payées
+### 4.6 Résumé des Catégories d'Heures
+
+| Catégorie | Formule | Description |
+|-----------|---------|-------------|
+| **H_charge** | `(t_aller × Trips_AB + t_retour × Trips_BA) / 60` | Heures commercial (avec passagers) |
+| **H_HLP** | `Km_HLP / v_hlp` | Heures hors ligne passagers (dépôt ↔ terminus) |
+| **H_tech** | `Km_tech / v_tech` | Heures techniques (maintenance, incidents) |
+| **H_technique_an** | `H_HLP + H_tech` | Total heures non-commerciales |
+| **H_total** | `H_charge + H_HLP + H_tech` | Total toutes heures d'exploitation |
+
+### 4.7 Heures Payées (Heures de Conduite)
 
 Les heures payées incluent un coefficient pour les pauses, préparations, etc.
 
@@ -567,13 +694,30 @@ PPHPD = 85 × 3 = 255 passagers/heure
 | **Km HLP** | `δ × (2 × Bus_max)` |
 | **Km techniques** | `Km_com × 0.06` |
 | **Km totaux** | `Km_com + Km_HLP + Km_tech` |
-| **Heures charge** | `(t_aller × Trips_AB + t_retour × Trips_BA) / 60` |
+| **Heures commercial** | `(t_aller × Trips_AB + t_retour × Trips_BA) / 60` |
+| **Heures HLP** | `Km_HLP / v_hlp` |
+| **Heures technique** | `Km_tech / v_tech` |
+| **Heures technique (an)** | `H_HLP + H_tech` |
+| **Heures totales** | `H_charge + H_HLP + H_tech` |
 | **Heures payées** | `H_total × 1.10` |
 | **ETP** | `H_payees / 7.5` |
 | **ETP avec réserve** | `ETP × 1.12` |
-| **PPHPD** | `85 × (60 / f_pointe)` |
+| **PPHPD** | `Capacité_calculée × (60 / f_pointe)` |
+| **Capacité bus** | Calculée selon longueur (voir Section 2) |
 
 ---
 
 **Document généré par Tomorrow Systems**  
-**Version 2.1 - 2025-11-09**
+**Version 2.2 - 2025-11-12**
+
+### Historique des Versions
+
+**Version 2.2 (2025-11-12)** :
+- Ajout du paramètre v_commercial (vitesse commerciale 18 km/h) pour calculs théoriques futurs
+- Simplification des paramètres par ligne : seule longueur_bus est personnalisable
+- Capacité automatiquement calculée depuis la longueur du bus
+- Séparation des heures en trois catégories distinctes : H_charge, H_technique_an (H_HLP + H_tech), H_total
+- Mise à jour du tableau récapitulatif des formules
+
+**Version 2.1 (2025-11-09)** :
+- Documentation initiale complète
